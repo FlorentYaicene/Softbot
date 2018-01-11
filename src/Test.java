@@ -11,15 +11,19 @@ import lejos.hardware.lcd.LCD;
 import lejos.hardware.lcd.TextLCD;
 import lejos.hardware.port.Port;
 import lejos.hardware.port.SensorPort;
+import lejos.hardware.sensor.EV3IRSensor;
 import lejos.hardware.sensor.EV3TouchSensor;
 import lejos.hardware.sensor.EV3UltrasonicSensor;
 import lejos.hardware.sensor.SensorMode;
 import lejos.hardware.sensor.SensorModes;
+import lejos.robotics.RangeFinderAdapter;
 import lejos.robotics.RegulatedMotor;
 import lejos.robotics.SampleProvider;
 import lejos.robotics.navigation.DifferentialPilot;
 import lejos.utility.Delay;
 import lejos.utility.PilotProps;
+import lejos.hardware.motor.EV3LargeRegulatedMotor;
+import lejos.hardware.port.MotorPort;
 
 public class Test {
 
@@ -27,110 +31,70 @@ public class Test {
 	static RegulatedMotor rightMotor;
 		
 	public static void main(String[] args ) throws Exception
-	{
-		//introMessage();
-		
-	
-    	PilotProps pp = new PilotProps();
-    	pp.loadPersistentValues();
-    	float wheelDiameter = Float.parseFloat(pp.getProperty(PilotProps.KEY_WHEELDIAMETER, "4.0"));
-    	float trackWidth = Float.parseFloat(pp.getProperty(PilotProps.KEY_TRACKWIDTH, "18.0"));
-    	
-    	System.out.println("Wheel diameter is " + wheelDiameter);
-    	System.out.println("Track width is " +trackWidth);
-    	
-    	leftMotor = PilotProps.getMotor(pp.getProperty(PilotProps.KEY_LEFTMOTOR, "B"));
-    	rightMotor = PilotProps.getMotor(pp.getProperty(PilotProps.KEY_RIGHTMOTOR, "C"));
-    	boolean reverse = Boolean.parseBoolean(pp.getProperty(PilotProps.KEY_REVERSE,"false"));
-    	
-    	DifferentialPilot robot = new DifferentialPilot(wheelDiameter,trackWidth,leftMotor,rightMotor,reverse);
+	{	    	
+		final RegulatedMotor leftMotor = new EV3LargeRegulatedMotor(MotorPort.B);
+		final RegulatedMotor rightMotor = new EV3LargeRegulatedMotor(MotorPort.C);
+    	final DifferentialPilot robot = new DifferentialPilot(5.6f, 11.8f, leftMotor, rightMotor, false);
     	 
-        // Wait for user to press ENTER
-    	//System.out.println("Waiting for press");
-		//Button.waitForAnyPress();
-        robot.setAcceleration(4000);
 		robot.setTravelSpeed(20); // cm/sec
-		robot.setRotateSpeed(180); // deg/sec
-		System.out.println("Going forwards");
+		
+		
+		float distance=10000;
+		int cpt=0;
+		
+		//Touch sensor
+		final EV3TouchSensor touchSensor1 = new EV3TouchSensor(SensorPort.S1);
+		final EV3TouchSensor touchSensor2 = new EV3TouchSensor(SensorPort.S2);
+		final SensorMode touch1 = touchSensor1.getTouchMode();
+		final SensorMode touch2 = touchSensor2.getTouchMode();
+		final float[] sampleTouch = new float[2];
+		boolean run = true;
+		
+		//Ultrason (mur gauche)		 
+		EV3UltrasonicSensor ir = new EV3UltrasonicSensor(SensorPort.S4);
+		final SampleProvider sampleProvider=ir.getDistanceMode();
+		float[] sampleUS = new float[sampleProvider.sampleSize()];
+		
 		robot.forward();
 		
-		
-//		// get a port instance
-//		Port port = LocalEV3.get().getPort("S2");
-//
-//		// Get an instance of the Ultrasonic EV3 sensor
-//		SensorModes sensor = new EV3UltrasonicSensor(port);
-//
-//		// get an instance of this sensor in measurement mode
-//		SampleProvider distance= sensor.getMode("Distance");
-//
-//		// initialize an array of floats for fetching samples. 
-//		// Ask the SampleProvider how long the array should be
-//		float[] sample = new float[distance.sampleSize()];
-		
-//		// fetch a sample
-//		while(true) 
-//		  distance.fetchSample(sample, 0);
-
-		EV3 ev3 = (EV3) BrickFinder.getLocal();
-		TextLCD lcd = ev3.getTextLCD();
-		Keys keys = ev3.getKeys();
-		long startTime = System.currentTimeMillis();
-		long duration;
-		
-		EV3TouchSensor touchSensor = new EV3TouchSensor(SensorPort.S1);
-		SensorMode touch = touchSensor.getTouchMode();
-		float[] sample = new float[touch.sampleSize()];
-		System.out.println("avant la boucle");
-
-		
-		do {
-			touch.fetchSample(sample, 0);
-			System.out.println("Dans la boucle");
-		} while (leftMotor.isMoving() && rightMotor.isMoving()
-				&& sample[0] == 0);
-		
-		System.out.println("Going backwards");
-		robot.backward();
-		Delay.msDelay(1000);
-		robot.stop();
-		
+		do {		
+			//Ultra son
+			sampleProvider.fetchSample(sampleUS, 0);
+			
+			//distance en metre
+			System.out.println("sample " + sampleUS[0]);
+			Delay.msDelay(500);
+			System.out.println("distance " + distance);
+			Delay.msDelay(500);
+			
+			//touch sensor
+			touch1.fetchSample(sampleTouch, 0);
+			touch2.fetchSample(sampleTouch, 1);
+			
+			if(((sampleUS[0]>=distance-0.02 && sampleUS[0]<=distance+0.02) || cpt==0) && (sampleTouch[0] == 0 && sampleTouch[1] == 0) && !robot.isMoving()) {
+				System.out.println("Is moving");
+				robot.forward();
+			}
+			
+			if(sampleTouch[0] != 0 || sampleTouch[1] != 0) {
+				System.out.println("stop toi");
+				robot.stop();
+				//Go backwards and turn right
+				robot.arc(10, -90);
+				cpt--;				
+				if(!robot.isMoving()) {
+					System.out.println("Delay");
+					Delay.msDelay(1000);
+					distance=sampleUS[0];
+				}				
+			}		
+			
+			if(sampleUS[0]>distance+0.02) {
+				System.out.println("N'est plus contre le mur / distance :" + distance);
+				robot.arc(10, 90);
+				cpt++;
+			}
+			
+		} while (Button.ESCAPE.isUp());
 	}
-   
-	public static void introMessage() {
-		
-		GraphicsLCD g = LocalEV3.get().getGraphicsLCD();
-		g.drawString("Pilot Demo", 5, 0, 0);
-		g.setFont(Font.getSmallFont());
-		g.drawString("Run the PilotParams sample ", 2, 20, 0);
-		g.drawString("first to create a properties " , 2, 30, 0);
-		g.drawString("file." , 2, 40, 0);
-		g.drawString("Requires a wheeled vehicle ", 2, 50, 0);
-		g.drawString("with two independant motors.", 2, 60, 0);
-		g.drawString("Plug motors into ports B and ", 2, 70, 0);
-		g.drawString("C and press enter. ", 2, 80, 0);
-		  
-		// Quit GUI button:
-		g.setFont(Font.getSmallFont()); // can also get specific size using Font.getFont()
-		int y_quit = 100;
-		int width_quit = 45;
-		int height_quit = width_quit/2;
-		int arc_diam = 6;
-		g.drawString("QUIT", 9, y_quit+7, 0);
-		g.drawLine(0, y_quit,  45, y_quit); // top line
-		g.drawLine(0, y_quit,  0, y_quit+height_quit-arc_diam/2); // left line
-		g.drawLine(width_quit, y_quit,  width_quit, y_quit+height_quit/2); // right line
-		g.drawLine(0+arc_diam/2, y_quit+height_quit,  width_quit-10, y_quit+height_quit); // bottom line
-		g.drawLine(width_quit-10, y_quit+height_quit, width_quit, y_quit+height_quit/2); // diagonal
-		g.drawArc(0, y_quit+height_quit-arc_diam, arc_diam, arc_diam, 180, 90);
-		
-		// Enter GUI button:
-		g.fillRect(width_quit+10, y_quit, height_quit, height_quit);
-		g.drawString("GO", width_quit+15, y_quit+7, 0,true);
-		
-		Button.waitForAnyPress();
-		if(Button.ESCAPE.isDown()) System.exit(0);
-		g.clear();
-	}
-
 }
